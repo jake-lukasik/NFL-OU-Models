@@ -1,0 +1,13 @@
+schedule_season,schedule_week,team_favorite_id,spread_favorite,over_under_line,stadium_neutral,weather_temperature,weather_wind_mph,home_id,away_id
+2024,12,KC,10.5,43.5,0,61,5,CAR,KC
+2024,12,MIN,3.5,39.5,0,47,9,CHI,MIN
+2024,12,HOU,7.5,40.5,0,72,0,HOU,TEN
+2024,12,DET,7.5,50.5,0,72,0,IND,DET
+2024,12,MIA,7,46.5,0,76,7,MIA,NE
+2024,12,TB,5.5,41.5,0,50,13,NYG,TB
+2024,12,WAS,10.5,44.5,0,56,10,WAS,DAL
+2024,12,DEN,5.5,41.5,0,72,0,LVR,DEN
+2024,12,GB,3,45.5,0,42,7,GB,SF
+2024,12,ARI,1.5,47.5,0,45,3,SEA,ARI
+2024,12,PHI,2.5,48.5,0,72,0,LAR,PHI
+2024,12,BAL,3,50.5,0,72,0,LAC,BAL
