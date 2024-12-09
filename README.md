@@ -52,7 +52,7 @@ Note, the only information that is required to run your own predictions is sched
 To install the required R packages, run:
 
 ```R
-install.packages(c("dplyr", "tidyverse", "randomForest", "pROC", "gbm", "caret", "knitr", "kableExtra"))
+install.packages(c("dplyr", "tidyverse", "randomForest", "xgboost", "pROC", "gbm", "caret", "knitr", "kableExtra", "Matrix"))
 ```
 ## Repository Contents
 
