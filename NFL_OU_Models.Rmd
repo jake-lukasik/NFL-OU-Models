@@ -1,0 +1,684 @@
+---
+title: "Final Project - STAT 380"
+author: "Jacob Lukasik & Michael Jenks"
+date: "2024-11-19"
+format: 
+  html:
+    toc: true
+    self-contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preparation, Research, and Data Processing:
+
+## What we want to find & our motivation
+
+In this project, we have compiled a huge amount of information about the NFL and previous games' information on betting lines and their results. With this data, we seek to build two separate predictive models for two different popular bets that someone can place on an NFL game. The first one is betting on the over or under. In sports betting, the over/under line is a number set by the betting market, and if the total score between both teams is greater than that number, then the over hits and then the under hits otherwise. We seek to use a classification model to determine this. The second model is a model to predict if the team favorited to win will cover the spread. I include more on what exactly the spread means down the road when we get to that point.
+
+Our motivation to do this project came from not only our avid love of football, but also because we wanted to try and gain some insights into what goes into predicting sporting events' outcomes. With the rise of sports betting in recent years since it became legal in many states in America, there has a been a boom in profit for the biggest sportsbooks in Vegas. We want to try and get a glimpse into what goes into betting successfully to the point where a bettor can make a profit, as well as to make a little money ourselves. 
+
+## Our data
+
+For this project, we used two separate sources for our data the first one being [this Kaggle repository](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data?select=spreadspoke_scores.csv) for the betting info and game results, and the second one being [Pro Football Reference](https://www.pro-football-reference.com/) for the team offensive and defensive stats by year. As you read, you will see that we consolidate all data into one table named *'scores'* this scores table contains many different parameters, so I won't reference every single one here, but if you are interested, I have attached some links for you to see exactly what each column is:
+
+[Scores and Lines Stats](https://www.kaggle.com/datasets/tobycrabtree/nfl-scores-and-betting-data/data) Scroll to the data section and from there you can see descriptions for each column.
+
+[Offensive Stats](https://www.pro-football-reference.com/years/2024/#all_team_stats) Scroll to just above the table with all team offensive stats (the table is titled *Team Offense*) and click on glossary.
+
+[Defensive Stats](https://www.pro-football-reference.com/years/2024/opp.htm) Scroll to just above the table with all team defensive stats and click on glossary.
+
+## Reading in data, loading necessary libraries
+
+```{r, message=FALSE}
+library(dplyr)
+library(tidyverse)
+library(randomForest)
+library(pROC)
+library(gbm)
+library(caret)
+library(knitr)
+library(kableExtra)
+```
+
+Firstly, we read in our three datasets containing team info, stadium info, and then scores and betting lines from all NFL games in the Superbowl era (post 1964)
+
+```{r}
+teams <- read.csv('nfl_teams.csv', stringsAsFactors = FALSE)
+stadiums <- read.csv('nfl_stadiums.csv', stringsAsFactors = FALSE)
+scores <- read.csv('spreadspoke_scores.csv', stringsAsFactors = FALSE)
+```
+
+We also read in team offensive and defensive statistics from every season 2014-2024 (the years contained in our data).
+
+```{r}
+offense_data_list <- list()
+
+for (year in 2014:2024) {
+  filename <- paste0(year, "OffenseRks.csv")
+  offense_data <- read.csv(filename, stringsAsFactors = FALSE)
+  offense_data$EXP. <- gsub("\\\\", "", offense_data$EXP.)
+  offense_data_list[[as.character(year)]] <- offense_data
+}
+
+for (year in 2014:2024) {
+  assign(paste0("offense_", year), offense_data_list[[as.character(year)]])
+}
+```
+
+```{r}
+defense_data_list <- list()
+
+for (year in 2014:2024) {
+  filename <- paste0(year, "DefenseRks.csv")
+  defense_data <- read.csv(filename, stringsAsFactors = FALSE)
+  defense_data$EXP. <- gsub("\\\\", "", defense_data$EXP.)
+  defense_data_list[[as.character(year)]] <- defense_data
+}
+
+for (year in 2014:2024) {
+  assign(paste0("defense_", year), defense_data_list[[as.character(year)]])
+}
+```
+
+### Pre-processing data
+
+Here, we will do some simple cleansing of the data, specifically renaming certain teams due to relocation/team name changing (the Rams and Chargers both moved to LA from St. Louis and San Diego respectively, the Washington Commanders were the Redskins, then the Washington Football Team, then the Commanders, and the Raiders moved from Oakland to Las Vegas). The reason we do this is to keep consistency throughout the ten year span, no other changes were made to the teams aside from relocation or the team name changing.
+
+```{r}
+scores <- scores %>% 
+  filter(!is.na(over_under_line)) %>% 
+  filter(schedule_season >= 2014) %>% 
+  mutate(
+    team_home = case_when(
+      team_home == "St. Louis Rams" ~ "Los Angeles Rams",
+      team_home == "San Diego Chargers" ~ "Los Angeles Chargers",
+      team_home == "Washington Redskins" ~ "Washington Commanders",
+      team_home == "Washington Football Team" ~ "Washington Commanders",
+      team_home == "Oakland Raiders" ~ "Las Vegas Raiders",
+      TRUE ~ team_home 
+    ),
+    team_away = case_when(
+      team_away == "St. Louis Rams" ~ "Los Angeles Rams",
+      team_away == "San Diego Chargers" ~ "Los Angeles Chargers",
+      team_away == "Washington Redskins" ~ "Washington Commanders",
+      team_away == "Washington Football Team" ~ "Washington Commanders",
+      team_home == "Oakland Raiders" ~ "Las Vegas Raiders",
+      TRUE ~ team_away
+    )
+  ) %>% 
+  select(-c('X', 'X.1', 'X.2', 'X.3', 'X.4', 'X.5', 'X.6', 'X.7', 'weather_detail', 'weather_humidity', 'stadium')) # weather humidity and detail is sparse, as well as stadium being a very highly distinct categorical variable. 
+
+```
+
+Here, we combine each of the individual years offense and defense dataframes into two huge offense and defense ones including the team id (for joining purposes later) as well as the year the statistics are from so we do not lost track of them.
+
+```{r}
+# initialize empty data frames for offense and defense to be condensed into
+offense <- data.frame()
+defense <- data.frame()
+
+# loop through years 2014-2024 to do transformations mentioned above
+for (year in 2014:2024) {
+  defense_dataset <- get(paste0("defense_", year))
+  defense_dataset$Rk <- as.numeric(defense_dataset$Rk)
+  defense_dataset <- defense_dataset %>%
+    mutate(
+      Tm = case_when(
+        Tm == "St. Louis Rams" ~ "Los Angeles Rams",
+        Tm == "San Diego Chargers" ~ "Los Angeles Chargers",
+        Tm == "Washington Redskins" ~ "Washington Commanders",
+        Tm == "Washington Football Team" ~ "Washington Commanders",
+        Tm == "Oakland Raiders" ~ "Las Vegas Raiders",
+        TRUE ~ Tm 
+      )
+    ) %>%
+    left_join(teams %>% select(team_name, team_id), by = c("Tm" = "team_name")) %>%
+    rename(rank = Rk) %>%
+    mutate(schedule_season = year)
+  defense <- bind_rows(defense, defense_dataset)
+  
+  offense_dataset <- get(paste0("offense_", year))
+  offense_dataset$Rk <- as.numeric(offense_dataset$Rk)
+  # Update 'Tm' values for the offense dataset
+  offense_dataset <- offense_dataset %>%
+    mutate(
+      Tm = case_when(
+        Tm == "St. Louis Rams" ~ "Los Angeles Rams",
+        Tm == "San Diego Chargers" ~ "Los Angeles Chargers",
+        Tm == "Washington Redskins" ~ "Washington Commanders",
+        Tm == "Washington Football Team" ~ "Washington Commanders",
+        Tm == "Oakland Raiders" ~ "Las Vegas Raiders",
+        TRUE ~ Tm 
+      )
+    ) %>%
+    left_join(teams %>% select(team_name, team_id), by = c("Tm" = "team_name")) %>%
+    rename(rank = Rk) %>%
+    mutate(schedule_season = year)
+  offense <- bind_rows(offense, offense_dataset)
+}
+```
+
+## Feature Engineering
+
+Here, we create a new column that compares the total score to the line set by the market and if it is greater than, we assign the over to the over_under_result field, under if it is less than the line, and a push if it is exactly equal (a push in betting terms means that the score was exactly what the line was, so the bettor is refunded their money). For our case, any rows that are a push we will drop for a better predictive model
+
+```{r}
+scores <- scores %>% 
+  mutate(
+    total_score = score_away + score_home,
+    o_u_result = case_when(
+      total_score > over_under_line ~ 1,   # If total score is greater than over_under_line, label "O"
+      total_score < over_under_line ~ 0,   # If total score is less than over_under_line, label "U"
+      total_score == over_under_line ~ 2,  # If total score is equal to over_under_line, label "P" (push)
+      TRUE ~ NA_integer_                  # Use NA_integer_ instead of NA_character_
+    )
+  ) %>%
+  filter(o_u_result != 2) #Remove rows with "P" (push)
+```
+
+Here, we simply join the scores table to the team_id field so that we can have the home and away teams' IDs on the scores table which is useful for this next part when we see if the team favorited covered the spread.
+
+```{r}
+scores <- scores %>%
+  left_join(teams %>% select(team_name, team_id), by = c("team_home" = "team_name")) %>% 
+  rename(home_id = team_id) %>% 
+  left_join(teams %>% select(team_name, team_id), by = c("team_away" = "team_name")) %>%
+  rename(away_id = team_id)
+```
+
+Before we move onward, we should define what exactly a 'spread' is in sports betting;
+
+The spread on a game can be reported in two different ways, using either a positive or negative number. Lets look at an example:
+
+![Score of the Philadelphia Eagles vs. The Washington Commanders Week 11 of the 2024 Season.](Eagles_Commanders_Score.png)
+
+And then, the betting odds from prior to this game:
+
+![Pregame Betting Odds for the Above Matchup](Eagles_Commanders_Odds.png)
+
+Thanks to [Scores and Odds](scoresandodds.com) for documenting those!
+
+So, from the above, we can see that the spread set before the game had Philadelphia -4.5, which in other words means that they were 4.5 point favorites. So, for them to 'cover the spread', which they did, they had to win the game by at least five points. Another way to look at it is after the game is over, if you subtract 4.5 points from the Eagles score and they still win, then they cover the spread.
+
+If you want to look at it the other way, the Commanders could have covered the spread if they had lost by 4 points or less. Or, if you *add* 4.5 points to the Commanders score after the game and they win, then they cover the spread.
+
+Here we just edit the spread so it is just a positive number that we can use to compare to the score differential (favorited team - underdog) and if the spread is \< the differential, then the spread hits.
+
+```{r}
+scores <- scores %>%
+  mutate(spread_favorite = abs(spread_favorite))
+```
+
+Here is where we figure out if the spread hit or not, we first figure out who was favorited (home or away), then check the score differential (favorited team score - the underdog score) and if its greater than the line then we mark variable favorite_cover as 1 and 0 if not.
+
+```{r}
+scores <- scores %>%
+  mutate(score_differential = abs(score_home - score_away)) %>%
+  mutate(
+    favorite_cover = case_when(
+      team_favorite_id == home_id & score_home - score_away > spread_favorite ~ 1,   # home team favorite, and wins by more than the spread
+      team_favorite_id == away_id & score_away - score_home > abs(spread_favorite) ~ 1,   # away team favorite, and wins by more than the spread
+      TRUE ~ 0  # otherwise, the spread outcome is 0
+    )
+  )  
+```
+
+Here, we also go ahead and mark if the moneyline bet for the favorited team hit, seeing if the favorited team scored more than the underdog. A moneyline bet in sports is the simplest bet, it is simply just outright picking who you think will win.
+
+```{r}
+scores <- scores %>%
+  mutate(
+    favorite_ML = case_when(
+      favorite_cover == 1 ~ 1,
+      team_favorite_id == home_id & score_home > score_away ~ 1,
+      team_favorite_id == away_id & score_away > score_home ~ 1,
+      TRUE ~ 0
+    )
+  )
+```
+
+Lastly, we join the offense and defense tables to the scores table, we do this such that home team offense stats are prefixed with home_offense, away teams offense is prefixed with away_offense and so on.
+
+```{r}
+scores <- scores %>%
+  left_join(offense %>%
+              rename_with(~ paste0("home_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  
+  left_join(defense %>%
+              rename_with(~ paste0("home_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm), 
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+
+  left_join(offense %>%
+              rename_with(~ paste0("away_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm), 
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  
+  left_join(defense %>%
+              rename_with(~ paste0("away_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm), 
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season"))
+```
+
+Now that we have the results of the bets from the scores, we can go back and drop the scores since we obviously won't know that information when trying to predict before a game, as well as some other information to reduce the number of parameters we will have to feed the model to make predictions.
+
+```{r, warning=FALSE}
+ou_df <- scores %>%
+  select(-c('schedule_date', 'score_home', 'score_away', 'score_differential', 'total_score', 'schedule_playoff', 'team_home', 'team_away')) %>%
+  mutate(schedule_week = as.numeric(as.character(schedule_week))) %>%
+  mutate(
+    stadium_neutral = case_when(
+      stadium_neutral == "FALSE" ~ 0,
+      stadium_neutral == "TRUE" ~ 1
+      )
+    ) %>%
+  mutate(team_favorite_id = as.factor(team_favorite_id)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id)) %>%
+  na.omit()
+```
+
+```{r}
+favorite_ML_pos <- which(names(ou_df) == "favorite_ML")
+
+ou_df <- ou_df %>%
+  mutate(across((favorite_ML_pos + 1):ncol(ou_df), as.numeric))
+```
+
+# Building our models:
+
+## Defining Model Success
+
+Most of the time, we want a model to be 100% accurate. There is no exception to that here, however, we can also define another cutoff that we want our accuracy to fall above.
+
+Many people that bet on sports have a saying that goes "52.4 is the most important number in sports betting". This comes from the fact that, betting at a -110 line (you have to bet 110 dollars to win 100 dollars), which is typically the line of an over under bet, you would need to win 52.4% of your bets to be overall profitable. So, for the following models, we will use the the 52.4% accuracy cutoff to determine the fit of our model. The other thing you need to keep in mind within this setting is that it is very hard to accurately predict the outcomes of sporting events, even using the models below. [BettingPros](https://www.bettingpros.com/articles/what-is-the-break-even-win-for-sports-betting/), an online sports betting blog, explained this principle very well in the link that I attached. 
+
+## Model 1: Over/Under Classification
+
+Before we can begin to build our model, we of course need to split our data into a training and test set, along with removing the outcome columns.
+
+```{r}
+set.seed(123)
+train_ind <- sample(1:nrow(ou_df), floor(0.8 * nrow(ou_df)))
+Train <- ou_df[train_ind, ]
+Test <- ou_df[-train_ind, ]
+```
+
+We go ahead and also remove the spread and moneyline columns and store those for later
+
+```{r}
+X_test_OU <- Test %>%
+  select(-c(o_u_result, favorite_cover, favorite_ML))
+y_test_OU <- Test %>%
+  select(o_u_result)
+
+Train_OU <- Train %>%
+  select(-c(favorite_cover, favorite_ML))
+```
+
+### Using Random Forest:
+
+```{r}
+set.seed(380)
+init_rf <- randomForest(as.factor(o_u_result) ~ ., data = Train_OU, 
+                   ntree = 500, mtry = 4)
+```
+
+```{r}
+error <- init_rf$err.rate[, 1]  # error rate for each tree (for classification task)
+
+# find number of trees where the error rate is minimized
+optimal_ntree <- which.min(error)
+
+# display optimal number of trees
+print(optimal_ntree)
+
+# plot error rate vs. num trees to visualize the relationship
+plot(error, type = "l", main = "Error vs. Number of Trees",
+     xlab = "Number of Trees", ylab = "Error Rate")
+abline(v = optimal_ntree, col = "red", lty = 2) 
+```
+
+So, after using a high ntree value to see the biggest range of tree values to decide an optimal one, we can redefine our rf model with the number of trees that minimizes error, 380:
+
+```{r}
+rf <- randomForest(as.factor(o_u_result) ~ ., data = Train_OU, 
+                   ntree = 380, mtry = 4)
+pred_prob1 <- predict(rf, newdata = X_test_OU, type = "prob")
+head(pred_prob1)
+
+pred_OU <- predict(rf, newdata = X_test_OU, type = "response")
+
+table(pred_OU, y_test_OU$o_u_result)
+mean(pred_OU == y_test_OU$o_u_result)
+```
+
+From this, we can see that with an optimal random forest model, we have reached an accuracy of 54.65%, which is higher than the threshold we defined earlier for profitable betting. Let us now create another model using GBM.
+
+### Using GBM:
+
+First, let us tune the model using 5 fold cross validation:
+
+```{r}
+set.seed(380)
+
+# define cross-validation 
+train_control <- trainControl(method = "cv",  # k-fold cross-validation
+                              number = 5,     # 5 fold
+                              verboseIter = TRUE)
+
+# define the range of n.trees values to search over
+tune_grid <- expand.grid(
+  .n.trees = seq(0, 3000, by = 100),
+  .interaction.depth = 2,       
+  .shrinkage = 0.001,                  
+  .n.minobsinnode = 10                   
+)
+
+# train GBM model using 5 fold cross-validation
+gbm_model_cv <- train(
+  as.factor(o_u_result) ~ .,                  
+  data = Train_OU, 
+  distribution = 'bernoulli',
+  method = "gbm",                  
+  trControl = train_control,         
+  tuneGrid = tune_grid,               
+  verbose = FALSE                 
+)
+
+# print the results of the cross-validation
+print(gbm_model_cv)
+
+# plot the # of iterations vs accuracy
+plot(gbm_model_cv)
+
+```
+
+From the plot we see output above, we see that right around 1100 trees is where the accuracy begins to plateau, so to avoid overfitting, we will set our n.trees to 1100:
+
+```{r}
+set.seed(380)
+
+gbm_model <- gbm(o_u_result ~ .,
+                 data = Train_OU, 
+                 distribution = "bernoulli", 
+                 shrinkage = 0.001, 
+                 interaction.depth = 2,
+                 n.minobsinnode = 10,
+                 n.trees = 1100, 
+                 n.cores = NULL, 
+                 verbose = FALSE) 
+
+# predict probabilities
+pred_prob_gbm <- predict(gbm_model, newdata = X_test_OU, type = "response")
+head(pred_prob_gbm)
+
+# make sure probabilities convert to class labels
+pred_gbm <- ifelse(pred_prob_gbm > 0.5, 1, 0)
+
+# evaluate metrics
+table(pred_gbm, y_test_OU$o_u_result)  # confusion matrix
+mean(pred_gbm == y_test_OU$o_u_result)  # accuracy
+```
+
+From the GBM model, we see we have generated an even higher accuracy than the random forest model, one of 55.21%.
+
+### Predicting a recent game unknown to our model:
+
+```{r}
+# create a dataframe with info about the new game we want to try and predict
+new_game <- data.frame(
+  schedule_season = 2024,
+  schedule_week = 11,
+  team_favorite_id = "PHI",
+  spread_favorite = 4.5,
+  over_under_line = 49.5,
+  stadium_neutral = 0,
+  weather_temperature = 45, 
+  weather_wind_mph = 9,
+  home_id = "PHI",
+  away_id = "WAS"
+)
+```
+
+```{r}
+# join the additional features from offense and defense data according to teams and season year
+new_game <- new_game %>%
+  left_join(offense %>%
+              rename_with(~ paste0("home_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("home_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(offense %>%
+              rename_with(~ paste0("away_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("away_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season"))
+```
+
+```{r}
+# manipulating datatypes to make sure they match what the model was trained on
+new_game <- new_game %>%
+  mutate(schedule_season = as.integer(schedule_season)) %>%
+  mutate(schedule_week = as.numeric(as.character(schedule_week))) %>%
+  mutate(weather_temperature = as.integer(weather_temperature)) %>%
+  mutate(weather_wind_mph = as.integer(weather_wind_mph)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id)) %>%
+  mutate(team_favorite_id = as.factor(team_favorite_id)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id))
+
+# make sure all offensive/defensive stats are numeric
+away_id_pos <- which(names(new_game) == "away_id")
+new_game <- new_game %>%
+  mutate(across((away_id_pos + 1):ncol(new_game), as.numeric))
+```
+
+```{r}
+# load the factor levels from training data to make sure the same amount of factor levels
+train_levels <- list(
+  home_id = levels(Train_OU$home_id),
+  away_id = levels(Train_OU$away_id),
+  team_favorite_id = levels(Train_OU$team_favorite_id)
+)
+
+new_game$home_id <- factor(new_game$home_id, levels = train_levels$home_id)
+new_game$away_id <- factor(new_game$away_id, levels = train_levels$away_id)
+new_game$team_favorite_id <- factor(new_game$team_favorite_id, levels = train_levels$team_favorite_id)
+
+```
+
+```{r}
+# predict using our random forest model
+pred_OU_rf <- predict(rf, newdata = new_game, type = "prob")
+pred_OU_rf
+prob_under <- pred_OU_rf[1, 1]
+prob_over <- pred_OU_rf[1, 2] 
+
+# make prediction based on which probability is higher
+if (prob_over > prob_under) {
+    predicted_class <- "Over"
+    certainty <- prob_over
+} else {
+    predicted_class <- "Under"
+    certainty <- prob_under
+}
+```
+
+```{r}
+cat("The prediction for the Over/Under with line set at",new_game$over_under_line[1], "using Gradient Boosting algorithm is that the", predicted_class, "will hit with", certainty, "% certainty.")
+```
+
+```{r}
+# predict using the gbm model
+pred_OU_gbm <- predict(gbm_model, newdata = new_game, type = "response")
+
+predicted_prob <- pred_OU_gbm  # This value will be between 0 and 1
+predicted_class <- ifelse(predicted_prob > 0.5, "Over", "Under")
+ifelse(predicted_class == 'Under', predicted_certainty <- (1-predicted_prob) * 100, predicted_certainty <- (predicted_prob) * 100)
+```
+
+```{r}
+cat("The prediction for the Over/Under with line set at",new_game$over_under_line[1], "using Gradient Boosting algorithm is that the", predicted_class, "will hit with", predicted_certainty, "% certainty.")
+```
+
+Revisiting this game, which is the one that I used as a prior example to explain how spread betting works, we can see that the under did hit, and that both of our models predicted this correctly.
+
+### Predicting games for Sunday, 11/24/2024
+
+Now, we will bump it up a notch and predict games for this coming Sunday, before they even happen. I have created an excel notebook which I have put in the info of every game this Sunday, and will read that in now and make sure the datatypes all match.
+
+```{r}
+week12_matchups <- read.csv("week12_matchups.csv")
+```
+
+```{r}
+# join the additional features from offense and defense data according to teams and season year
+week12_matchups <- week12_matchups %>%
+  left_join(offense %>%
+              rename_with(~ paste0("home_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("home_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(offense %>%
+              rename_with(~ paste0("away_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("away_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season"))
+```
+
+```{r}
+# manipulating datatypes to make sure they match what the model was trained on
+week12_matchups <- week12_matchups %>%
+  mutate(schedule_season = as.integer(schedule_season)) %>%
+  mutate(schedule_week = as.numeric(as.character(schedule_week))) %>%
+  mutate(weather_temperature = as.integer(weather_temperature)) %>%
+  mutate(weather_wind_mph = as.integer(weather_wind_mph)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id)) %>%
+  mutate(team_favorite_id = as.factor(team_favorite_id)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id))
+
+# make sure all offensive/defensive stats are numeric
+away_id_pos <- which(names(week12_matchups) == "away_id")
+week12_matchups <- week12_matchups %>%
+  mutate(across((away_id_pos + 1):ncol(week12_matchups), as.numeric))
+```
+
+```{r}
+# load the factor levels from training data to make sure the same amount of factor levels
+train_levels <- list(
+  home_id = levels(Train_OU$home_id),
+  away_id = levels(Train_OU$away_id),
+  team_favorite_id = levels(Train_OU$team_favorite_id)
+)
+
+week12_matchups$home_id <- factor(week12_matchups$home_id, levels = train_levels$home_id)
+week12_matchups$away_id <- factor(week12_matchups$away_id, levels = train_levels$away_id)
+week12_matchups$team_favorite_id <- factor(week12_matchups$team_favorite_id, levels = train_levels$team_favorite_id)
+
+```
+
+#### Predicting via random forest
+
+```{r}
+week12_pred_OU_rf <- predict(rf, newdata = week12_matchups, type = "prob")
+
+# consolidate all predictions into a new dataframe
+week12_under_class <- week12_pred_OU_rf[, 1]  # probs for class over
+week12_over_class <- week12_pred_OU_rf[, 2]  # probs for class under
+week12_rf_pred_OU <- ifelse(week12_over_class > 0.5, "Over", "Under")
+week12_rf_pred_prob <- ifelse(week12_rf_pred_OU == "Over", round(week12_over_class*100,3), round(week12_under_class*100,3))
+
+rf_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,  
+  Away = week12_matchups$away_id,  
+  Line = week12_matchups$over_under_line,
+  Prediction = week12_rf_pred_OU,            # prediction: Over or Under
+  Confidence = week12_rf_pred_prob           # probability associated with the predicted outcome
+)
+
+rf_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Random Forest Algorithm") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+Now lets find the games with the three highest confidence for the predictions. 
+
+```{r}
+top_rf_locks <- rf_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>% 
+  select(Home, Away, `Prediction`)
+top_rf_locks
+```
+
+So, according to the random forest algorithm, the three games that we should bet money on the most (highest probability of going one way or the other), are Tennessee @ Houston, Denver @ Las Vegas, and Tampa Bay @ New York Giants. 
+
+#### Predicting via gradient boosting
+
+```{r}
+week12_pred_OU_gbm <- predict(gbm_model, newdata = week12_matchups, type = "response")
+week12_gbm_pred_OU <- ifelse(week12_pred_OU_gbm > 0.5, "Over", "Under")
+week12_gbm_pred_prob <- ifelse(week12_gbm_pred_OU == "Over", round(week12_pred_OU_gbm*100,3), round((1-week12_pred_OU_gbm)*100,3))
+
+
+gbm_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,  
+  Away = week12_matchups$away_id,  
+  Line = week12_matchups$over_under_line,
+  Prediction = week12_gbm_pred_OU,            # prediction: Over or Under
+  Confidence = week12_gbm_pred_prob           # probability associated with the predicted outcome
+)
+
+gbm_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Gradient Boosting Algorithm") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+We can also find the top three games with the highest confidence like we did for random forest
+
+```{r}
+top_gbm_locks <- gbm_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>%  
+  select(Home, Away, `Prediction`)
+top_gbm_locks
+```
+
+So according to the gradient boosting algorithm, the top games to bet on are Tennessee @ Houston, Detroit @ Indianapolis, and Minnesota @ Chicago.
+
+
+
+
+
+
+
+
+
+
