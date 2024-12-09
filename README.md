@@ -7,7 +7,7 @@ This project was done by Jacob Lukasik and Michael Jenks as a final project for 
 ## Requirements
 
 - R (>= 4.0.0) (Models were coded in R 4.3.1)
-- Required R packages: `dplyr`, `tidyverse`, `randomForest`, `pROC`, `gbm`, `caret`, `knitr`, `kableExtra`
+- Required R packages: `dplyr`, `tidyverse`, `randomForest`, `pROC`, `gbm`, `caret`, `knitr`, `kableExtra`, `Matrix`
 - Knowledge in various machine learning models
 
 ## Data Sources
