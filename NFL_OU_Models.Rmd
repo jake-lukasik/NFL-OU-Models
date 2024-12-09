@@ -686,7 +686,7 @@ So according to the gradient boosting algorithm, the top games to bet on are Ten
 
 ![Screenshot of my FanDuel bet](HoustonTennesseeBet.png)
 
-#### XGboost
+## XGboost
 
 First we will create our model matrices to be able to be added into the xgboost function in R. We will also filter the test data for this model by filtering out columns. 
 
@@ -700,6 +700,8 @@ test.mx <- sparse.model.matrix(o_u_result ~ ., xgboosttest)[, -9]
 dtrain <- xgb.DMatrix(train.mx, label = Train_OU$o_u_result)
 dtest <- xgb.DMatrix(test.mx, label = xgboosttest$o_u_result)
 ```
+
+### Baseline Model
 
 To fit the first XGboost model, we will select arbitrary baselines for each parameter. Later on, we will tune parameters for the XGboost model and compare perforamnce. 
 
@@ -730,6 +732,8 @@ xgboosttest$prediction <- ifelse(preds > 0.324, 1, 0)
 
 mean(xgboosttest$o_u_result == xgboosttest$prediction)
 ```
+
+### Hyperparameter Tuning
 
 Now, we will tune hyperparameters. Due to time constraints and running time, we will reduce the number of hyperparameters tuned. A possible improvement in the future could be to tune more parameters for more values with more time and better resources. For the purposes of this project, the tuning below will be apt. 
 
@@ -793,6 +797,8 @@ mean(xgboosttest$o_u_result == xgboosttest$predictionTuning)
 
 The above model gives an accuracy of 60%, almost a 2% increase than the baseline model. We can also examine the AUC values for each model and further see the improvement of each model. In the first model, the AUC is about 0.56, and the tuned model achieves an AUC of 0.59. Now we can test the simplest model useable for our project, logistic regression.  
 
+## Logistic Regression
+
 ```{r}
 # Logistic Regression
 model_lr <- glm(factor(o_u_result) ~ ., data = Train_OU, family = binomial())
@@ -801,16 +807,16 @@ plot(roc(response = xgboosttest$o_u_result, predictor = pred_lr, levels = 0:1, d
 mean(ifelse(pred_lr > 0.418, 1, 0) == xgboosttest$o_u_result)
 ```
 
-From the above results, the logistic regression model achieves the highest accuracy of any model trained. This result could be for many reasons including the unpredictability of the NFL. The simplest model does not try to over emphasize any 1 parameter, while other models may pay more attention to certain predictors confusing the model. 
+From the above results, the logistic regression model achieves the highest accuracy of any model trained. This result could be for many reasons including the unpredictability of the NFL. The simplest model does not try to over emphasize any 1 parameter, while other models may pay more attention to certain predictors confusing the model. Another consideration when using the logistic regression model is multicollinearity, as many of our predictors may be naturally correlated. 
 
 
-### Limitations
+# Limitations
 
 There are many areas of our project than can be described as limitations. The nature of the NFL is one, where so many different things can determine the outcome of a game. The most important one is that NFL players are humans, and show human emotions week-to-week that may change over the course of an NFL season. There are countless examples including momentum, as a team playing well may continue to play well, or perhaps a team has a lt down game where they fail to achieve the results they had been known to achieve. There are also other observations for which we do not have the current data for, such as major injuries and number of injuries for a team. Offseason player movement and trades is another area that could influence week-to-week changes or seasonal changes. Through all of these limitations, our models were still able to perform at a level that can be effectively used. 
 
-Another potential area to explore is the use of every predictor in our models. Some predictors may not be as effective as others in the model and may even point the model in the wrong direction. In the future, variable selection methods could be explored to further enhance the performance of our models. Also, as mentioned earlier in this project the tuning of hyperparameters was used to improve prediction accuracy. The scope of tuning of these parameters was relatively small and could be widened in the future at the cost of efficieny and runtime. Clearly, this project still has possibilities to expand and become even more effective. 
+Another potential area to explore is the use of every predictor in our models. Some predictors may not be as effective as others in the model and may even point the model in the wrong direction. In the future, variable selection methods could be explored to further enhance the performance of our models. Also, as mentioned earlier in this project the tuning of hyperparameters was used to improve prediction accuracy. The scope of tuning of these parameters was relatively small and could be widened in the future at the cost of deficiency and runtime. Clearly, this project still has possibilities to expand and become even more effective. 
 
-### Conclusion and Discussion
+# Conclusion and Discussion
 
 Through using machine learning methods, we were able to train models to predict the over/under of NFL games with profit potential. Each of the models above achieves a testing accuracy of greater than 52.4%, the accuracy needed to be profitable at approximately -110 odds. Each models performed differently and the model with the greatest accuracy was logistic regression. Through our results, we can effectively and with confidence place bets on the over/under line of NFL games and make a profit.
 
