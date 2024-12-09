@@ -26,7 +26,7 @@ Special thank you to Spreadspoke and Pro Football Reference for making this data
 
 ## Data
 
-The project relies on historical NFL game data, including team performance, player statistics, and betting lines for Over/Under. You will need to provide the data in the following format:
+The project relies on historical NFL game data, including team performance, player statistics, and betting lines for Over/Under. To make your own predictions, will need to provide the data in the following format (see `week12_matchups.csv` in supplementary-material folder to see how to format exactly):
 
 ### Template Data Source
 
@@ -54,3 +54,8 @@ To install the required R packages, run:
 ```R
 install.packages(c("dplyr", "tidyverse", "randomForest", "pROC", "gbm", "caret", "knitr", "kableExtra"))
 ```
+## Repository Contents
+
+All data has been saved in .csv format and uploaded to this repository. If you intend to do anything other than running the exact algorithms in the Rmd on this page, *download the data directly from sources above*.
+
+The Rmd file and HTML that was rendered from it are available on this page, along with the PowerPoint presentation we used to present this to faculty and peers.
