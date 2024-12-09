@@ -3,6 +3,7 @@
 This project aims to predict NFL Over/Under betting outcomes using machine learning algorithms in R. The model utilizes historical game data, team offensive and defensive statistics, and other relevant features to estimate the total points scored in a game and compare it to the betting lines.
 
 This project was done by Jacob Lukasik and Michael Jenks as a final project for STAT380 - Data Science Through Statistical Reasoning and Computation. We are both B.S. Data Science majors in the Eberly College of Science at Penn State University. *The models found in this project were created to gain insight into what contributes to total scores in NFL games and to try and predict the correct outcomes for Over/Under bets and in no ways do we seek to use this with any ill intent, including but not limited to advising others how to bet, claiming that this is a 100% accurate model, etc. PLEASE BET RESPONSIBLY*
+
 ## Requirements
 
 - R (>= 4.0.0) (Models were coded in R 4.3.1)
@@ -18,6 +19,8 @@ For this project, two separate sources were used for data; the first one being [
 [Offensive Stats](https://www.pro-football-reference.com/years/2024/#all_team_stats) Scroll to just above the table with all team offensive stats (the table is titled *Team Offense*) and click on glossary.
 
 [Defensive Stats](https://www.pro-football-reference.com/years/2024/opp.htm) Scroll to just above the table with all team defensive stats and click on glossary.
+
+The data sources above were used ethically and responsibly as according to [Kaggle's standard CC BY-NC-SA 4.0 License](https://creativecommons.org/licenses/by-nc-sa/4.0/) and [Sports Reference's Data Use Policy](https://www.sports-reference.com/data_use.html). All data from PFR was downloaded manually by Jacob Lukasik and no web scraping scripts or bots were used to obtain offensive and defensive team statistics.
 
 Special thank you to Spreadspoke and Pro Football Reference for making this data so easily accessible and allowing people to use their data for projects like these.
 
