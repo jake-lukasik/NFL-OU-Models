@@ -1,7 +1,7 @@
 ---
-title: "Final Project - STAT 380"
+title: "Using Machine Learning to Predict NFL Betting Outcomes"
 author: "Jacob Lukasik & Michael Jenks"
-date: "2024-11-19"
+date: "2024-12-09"
 format: 
   html:
     toc: true
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## What we want to find & our motivation
 
-In this project, we have compiled a huge amount of information about the NFL and previous games' information on betting lines and their results. With this data, we seek to build two separate predictive models for two different popular bets that someone can place on an NFL game. The first one is betting on the over or under. In sports betting, the over/under line is a number set by the betting market, and if the total score between both teams is greater than that number, then the over hits and then the under hits otherwise. We seek to use a classification model to determine this. The second model is a model to predict if the team favorited to win will cover the spread. I include more on what exactly the spread means down the road when we get to that point.
+In this project, we have compiled a huge amount of information about the NFL and previous games' information on betting lines and their results. With this data, we seek to build several predictive models for betting on the over or under. In sports betting, the over/under line is a number set by the betting market, and if the total score between both teams is greater than that number, then the over hits and then the under hits otherwise. We seek to use a classification model to determine this.
 
 Our motivation to do this project came from not only our avid love of football, but also because we wanted to try and gain some insights into what goes into predicting sporting events' outcomes. With the rise of sports betting in recent years since it became legal in many states in America, there has a been a boom in profit for the biggest sportsbooks in Vegas. We want to try and get a glimpse into what goes into betting successfully to the point where a bettor can make a profit, as well as to make a little money ourselves. 
 
@@ -36,15 +36,13 @@ For this project, we used two separate sources for our data the first one being 
 library(dplyr)
 library(tidyverse)
 library(randomForest)
+library(xgboost)
 library(pROC)
 library(gbm)
 library(caret)
 library(knitr)
 library(kableExtra)
 library(Matrix)
-library(xgboost)
-library(pROC)
-library(caret)
 ```
 
 Firstly, we read in our three datasets containing team info, stadium info, and then scores and betting lines from all NFL games in the Superbowl era (post 1964)
@@ -183,7 +181,7 @@ scores <- scores %>%
   filter(o_u_result != 2) #Remove rows with "P" (push)
 ```
 
-Here, we simply join the scores table to the team_id field so that we can have the home and away teams' IDs on the scores table which is useful for this next part when we see if the team favorited covered the spread.
+Here, we simply join the scores table to the team_id field so that we can have the home and away teams' IDs on the scores table
 
 ```{r}
 scores <- scores %>%
@@ -193,7 +191,7 @@ scores <- scores %>%
   rename(away_id = team_id)
 ```
 
-Before we move onward, we should define what exactly a 'spread' is in sports betting;
+Before we move onward, we should define what exactly a 'spread' is in sports betting, as you will see it come up occasionally. It is not explicitly used in our models, but for the future, if we seek to build a model that aims to predict spread, it will be useful information;
 
 The spread on a game can be reported in two different ways, using either a positive or negative number. Lets look at an example:
 
@@ -302,7 +300,7 @@ Most of the time, we want a model to be 100% accurate. There is no exception to 
 
 Many people that bet on sports have a saying that goes "52.4 is the most important number in sports betting". This comes from the fact that, betting at a -110 line (you have to bet 110 dollars to win 100 dollars), which is typically the line of an over under bet, you would need to win 52.4% of your bets to be overall profitable. So, for the following models, we will use the the 52.4% accuracy cutoff to determine the fit of our model. The other thing you need to keep in mind within this setting is that it is very hard to accurately predict the outcomes of sporting events, even using the models below. [BettingPros](https://www.bettingpros.com/articles/what-is-the-break-even-win-for-sports-betting/), an online sports betting blog, explained this principle very well in the link that I attached. 
 
-## Model 1: Over/Under Classification
+## Over/Under Classification Models
 
 Before we can begin to build our model, we of course need to split our data into a training and test set, along with removing the outcome columns.
 
@@ -436,10 +434,6 @@ From the GBM model, we see we have generated an even higher accuracy than the ra
 
 ```{r}
 # create a dataframe with info about the new game we want to try and predict
-```
-
-
-```{r}
 new_game <- data.frame(
   schedule_season = 2024,
   schedule_week = 11,
@@ -453,8 +447,6 @@ new_game <- data.frame(
   away_id = "WAS"
 )
 ```
-
-
 
 ```{r}
 # join the additional features from offense and defense data according to teams and season year
@@ -546,146 +538,6 @@ cat("The prediction for the Over/Under with line set at",new_game$over_under_lin
 
 Revisiting this game, which is the one that I used as a prior example to explain how spread betting works, we can see that the under did hit, and that both of our models predicted this correctly.
 
-### Predicting games for Sunday, 11/24/2024
-
-Now, we will bump it up a notch and predict games for this coming Sunday, before they even happen. I have created an excel notebook which I have put in the info of every game this Sunday, and will read that in now and make sure the datatypes all match.
-
-```{r}
-week12_matchups <- read.csv("week12_matchups.csv")
-```
-
-```{r}
-# join the additional features from offense and defense data according to teams and season year
-week12_matchups <- week12_matchups %>%
-  left_join(offense %>%
-              rename_with(~ paste0("home_offense_", .), -c(team_id, schedule_season, Tm)) %>%
-              select(-Tm),
-            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
-  left_join(defense %>%
-              rename_with(~ paste0("home_defense_", .), -c(team_id, schedule_season, Tm)) %>%
-              select(-Tm),
-            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
-  left_join(offense %>%
-              rename_with(~ paste0("away_offense_", .), -c(team_id, schedule_season, Tm)) %>%
-              select(-Tm),
-            by = c("away_id" = "team_id", "schedule_season" = "schedule_season")) %>%
-  left_join(defense %>%
-              rename_with(~ paste0("away_defense_", .), -c(team_id, schedule_season, Tm)) %>%
-              select(-Tm),
-            by = c("away_id" = "team_id", "schedule_season" = "schedule_season"))
-```
-
-```{r}
-# manipulating datatypes to make sure they match what the model was trained on
-week12_matchups <- week12_matchups %>%
-  mutate(schedule_season = as.integer(schedule_season)) %>%
-  mutate(schedule_week = as.numeric(as.character(schedule_week))) %>%
-  mutate(weather_temperature = as.integer(weather_temperature)) %>%
-  mutate(weather_wind_mph = as.integer(weather_wind_mph)) %>%
-  mutate(home_id = as.factor(home_id)) %>%
-  mutate(away_id = as.factor(away_id)) %>%
-  mutate(team_favorite_id = as.factor(team_favorite_id)) %>%
-  mutate(home_id = as.factor(home_id)) %>%
-  mutate(away_id = as.factor(away_id))
-
-# make sure all offensive/defensive stats are numeric
-away_id_pos <- which(names(week12_matchups) == "away_id")
-week12_matchups <- week12_matchups %>%
-  mutate(across((away_id_pos + 1):ncol(week12_matchups), as.numeric))
-```
-
-```{r}
-# load the factor levels from training data to make sure the same amount of factor levels
-train_levels <- list(
-  home_id = levels(Train_OU$home_id),
-  away_id = levels(Train_OU$away_id),
-  team_favorite_id = levels(Train_OU$team_favorite_id)
-)
-
-week12_matchups$home_id <- factor(week12_matchups$home_id, levels = train_levels$home_id)
-week12_matchups$away_id <- factor(week12_matchups$away_id, levels = train_levels$away_id)
-week12_matchups$team_favorite_id <- factor(week12_matchups$team_favorite_id, levels = train_levels$team_favorite_id)
-
-```
-
-#### Predicting via random forest
-
-```{r}
-week12_pred_OU_rf <- predict(rf, newdata = week12_matchups, type = "prob")
-
-# consolidate all predictions into a new dataframe
-week12_under_class <- week12_pred_OU_rf[, 1]  # probs for class over
-week12_over_class <- week12_pred_OU_rf[, 2]  # probs for class under
-week12_rf_pred_OU <- ifelse(week12_over_class > 0.5, "Over", "Under")
-week12_rf_pred_prob <- ifelse(week12_rf_pred_OU == "Over", round(week12_over_class*100,3), round(week12_under_class*100,3))
-
-rf_prediction_df <- data.frame(
-  Home = week12_matchups$home_id,  
-  Away = week12_matchups$away_id,  
-  Line = week12_matchups$over_under_line,
-  Prediction = week12_rf_pred_OU,            # prediction: Over or Under
-  Confidence = week12_rf_pred_prob           # probability associated with the predicted outcome
-)
-
-
-rf_prediction_df %>%
-  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Random Forest Algorithm") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
-  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
-  add_header_above(c("Game Information" = 3, "Prediction" = 2))
-```
-
-Now lets find the games with the three highest confidence for the predictions. 
-
-```{r}
-top_rf_locks <- rf_prediction_df %>%
-  arrange(desc(`Confidence`)) %>% 
-  head(3) %>% 
-  select(Home, Away, `Prediction`)
-top_rf_locks
-```
-
-So, according to the random forest algorithm, the three games that we should bet money on the most (highest probability of going one way or the other), are Tennessee @ Houston, Denver @ Las Vegas, and Tampa Bay @ New York Giants. 
-
-#### Predicting via gradient boosting
-
-```{r}
-week12_pred_OU_gbm <- predict(gbm_model, newdata = week12_matchups, type = "response")
-week12_gbm_pred_OU <- ifelse(week12_pred_OU_gbm > 0.5, "Over", "Under")
-week12_gbm_pred_prob <- ifelse(week12_gbm_pred_OU == "Over", round(week12_pred_OU_gbm*100,3), round((1-week12_pred_OU_gbm)*100,3))
-
-
-gbm_prediction_df <- data.frame(
-  Home = week12_matchups$home_id,  
-  Away = week12_matchups$away_id,  
-  Line = week12_matchups$over_under_line,
-  Prediction = week12_gbm_pred_OU,            # prediction: Over or Under
-  Confidence = week12_gbm_pred_prob           # probability associated with the predicted outcome
-)
-
-gbm_prediction_df %>%
-  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Gradient Boosting Algorithm") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
-  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
-  add_header_above(c("Game Information" = 3, "Prediction" = 2))
-```
-
-We can also find the top three games with the highest confidence like we did for random forest
-
-```{r}
-top_gbm_locks <- gbm_prediction_df %>%
-  arrange(desc(`Confidence`)) %>% 
-  head(3) %>%  
-  select(Home, Away, `Prediction`)
-top_gbm_locks
-```
-
-So according to the gradient boosting algorithm, the top games to bet on are Tennessee @ Houston, Detroit @ Indianapolis, and Minnesota @ Chicago. Based on the fact that Houston vs. Tennessee was the most confident one for both algorithms:
-
-![Screenshot of my FanDuel bet](HoustonTennesseeBet.png)
-
 ## XGboost
 
 First we will create our model matrices to be able to be added into the xgboost function in R. We will also filter the test data for this model by filtering out columns. 
@@ -719,7 +571,7 @@ model_xgb <- xgboost(
     colsample_bytree = 0.8), 
   data = dtrain, 
   nrounds = 100,
-  early_stopping_rounds = 10,   # XGBoost provides early stopping!
+  early_stopping_rounds = 10, 
   verbose = FALSE 
 )
 preds <- predict(model_xgb, newdata = dtest)
@@ -809,6 +661,294 @@ mean(ifelse(pred_lr > 0.418, 1, 0) == xgboosttest$o_u_result)
 
 From the above results, the logistic regression model achieves the highest accuracy of any model trained. This result could be for many reasons including the unpredictability of the NFL. The simplest model does not try to over emphasize any 1 parameter, while other models may pay more attention to certain predictors confusing the model. Another consideration when using the logistic regression model is multicollinearity, as many of our predictors may be naturally correlated. 
 
+### Predicting games for Sunday, 11/24/2024
+
+Now, we will bump it up a notch and predict games for this coming Sunday, before they even happen. I have created an excel notebook which I have put in the info of every game this Sunday, and will read that in now and make sure the datatypes all match.
+
+```{r}
+week12_matchups <- read.csv("week12_matchups.csv")
+```
+
+```{r}
+# join the additional features from offense and defense data according to teams and season year
+week12_matchups <- week12_matchups %>%
+  left_join(offense %>%
+              rename_with(~ paste0("home_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("home_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("home_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(offense %>%
+              rename_with(~ paste0("away_offense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season")) %>%
+  left_join(defense %>%
+              rename_with(~ paste0("away_defense_", .), -c(team_id, schedule_season, Tm)) %>%
+              select(-Tm),
+            by = c("away_id" = "team_id", "schedule_season" = "schedule_season"))
+```
+
+```{r}
+# manipulating datatypes to make sure they match what the model was trained on
+week12_matchups <- week12_matchups %>%
+  mutate(schedule_season = as.integer(schedule_season)) %>%
+  mutate(schedule_week = as.numeric(as.character(schedule_week))) %>%
+  mutate(weather_temperature = as.integer(weather_temperature)) %>%
+  mutate(weather_wind_mph = as.integer(weather_wind_mph)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id)) %>%
+  mutate(team_favorite_id = as.factor(team_favorite_id)) %>%
+  mutate(home_id = as.factor(home_id)) %>%
+  mutate(away_id = as.factor(away_id))
+
+# make sure all offensive/defensive stats are numeric
+away_id_pos <- which(names(week12_matchups) == "away_id")
+week12_matchups <- week12_matchups %>%
+  mutate(across((away_id_pos + 1):ncol(week12_matchups), as.numeric))
+```
+
+```{r}
+# load the factor levels from training data to make sure the same amount of factor levels
+train_levels <- list(
+  home_id = levels(Train_OU$home_id),
+  away_id = levels(Train_OU$away_id),
+  team_favorite_id = levels(Train_OU$team_favorite_id)
+)
+
+week12_matchups$home_id <- factor(week12_matchups$home_id, levels = train_levels$home_id)
+week12_matchups$away_id <- factor(week12_matchups$away_id, levels = train_levels$away_id)
+week12_matchups$team_favorite_id <- factor(week12_matchups$team_favorite_id, levels = train_levels$team_favorite_id)
+
+```
+
+#### Predicting via random forest
+
+```{r}
+week12_pred_OU_rf <- predict(rf, newdata = week12_matchups, type = "prob")
+
+# consolidate all predictions into a new dataframe
+week12_under_class <- week12_pred_OU_rf[, 1]  # probs for class over
+week12_over_class <- week12_pred_OU_rf[, 2]  # probs for class under
+week12_rf_pred_OU <- ifelse(week12_over_class > 0.5, "Over", "Under")
+week12_rf_pred_prob <- ifelse(week12_rf_pred_OU == "Over", round(week12_over_class*100,3), round(week12_under_class*100,3))
+
+rf_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,  
+  Away = week12_matchups$away_id,  
+  Line = week12_matchups$over_under_line,
+  Prediction = week12_rf_pred_OU,            # prediction: Over or Under
+  Confidence = week12_rf_pred_prob           # probability associated with the predicted outcome
+)
+
+rf_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Random Forest Algorithm") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+Now lets find the games with the three highest confidence for the predictions. 
+
+```{r}
+top_rf_locks <- rf_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>% 
+  select(Home, Away, `Prediction`)
+top_rf_locks
+```
+
+So, according to the random forest algorithm, the three games that we should bet money on the most (highest probability of going one way or the other), are Tennessee @ Houston, Denver @ Las Vegas, and Tampa Bay @ New York Giants. 
+
+#### Predicting via gradient boosting
+
+```{r}
+week12_pred_OU_gbm <- predict(gbm_model, newdata = week12_matchups, type = "response")
+week12_gbm_pred_OU <- ifelse(week12_pred_OU_gbm > 0.5, "Over", "Under")
+week12_gbm_pred_prob <- ifelse(week12_gbm_pred_OU == "Over", round(week12_pred_OU_gbm*100,3), round((1-week12_pred_OU_gbm)*100,3))
+
+
+gbm_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,  
+  Away = week12_matchups$away_id,  
+  Line = week12_matchups$over_under_line,
+  Prediction = week12_gbm_pred_OU,            # prediction: Over or Under
+  Confidence = week12_gbm_pred_prob           # probability associated with the predicted outcome
+)
+
+gbm_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Gradient Boosting Algorithm") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+We can also find the top three games with the highest confidence like we did for random forest
+
+```{r}
+top_gbm_locks <- gbm_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>%  
+  select(Home, Away, `Prediction`)
+top_gbm_locks
+```
+
+So according to the gradient boosting algorithm, the top games to bet on are Tennessee @ Houston, Detroit @ Indianapolis, and Minnesota @ Chicago.
+
+#### Predicting via XGBoost:
+
+Repeating the same process seen in the previous model predictions:
+
+First, because of the way that XGBoost model works, we have to first create a matrix with the week 12 matchup infor, then it is the same process
+
+```{r}
+week12.mx <- sparse.model.matrix(~ ., data = week12_matchups)
+train_columns <- colnames(dtrain)
+# ensure only the common columns remain
+week12.mx <- week12.mx[, colnames(week12.mx) %in% train_columns]
+week12_dmatrix <- xgb.DMatrix(week12.mx)
+```
+
+```{r}
+# make predictions using the trained XGBoost model on the new data 
+week12_pred_OU_xgb <- predict(final_model, newdata = week12_dmatrix)
+
+# convert the probabilities to "Over" or "Under" based on a threshold
+week12_xgb_pred_OU <- ifelse(week12_pred_OU_xgb > 0.383, "Over", "Under")
+
+week12_xgb_pred_prob <- ifelse(week12_xgb_pred_OU == "Over", 
+                               round((0.5+(week12_pred_OU_xgb - 0.383))*100,3), 
+                               round((0.5+(0.383 - week12_pred_OU_xgb))*100,3)
+                               )
+  
+  
+# Consolidate the predictions into a new dataframe
+xgb_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,   # home team ID
+  Away = week12_matchups$away_id,   # away team ID
+  Line = week12_matchups$over_under_line,  # Over/Under line
+  Prediction = week12_xgb_pred_OU,  # prediction: "Over" or "Under"
+  Confidence = week12_xgb_pred_prob # probability based off predict output
+)
+
+# display the predictions in a nicely formatted table using kable
+xgb_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By XGBoost Model") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+Due to the nature of the XGBoost algorithm and how the cutoff is at 0.383 for the most accurate predictions, and not just 0.5, it is very hard to quantify the confidence (proability), so for this table, we have had to do some feature engineering for most accurate confidence levels scaled at a reasonable value.
+
+Doing the same thing to find the three best bets:
+
+```{r}
+top_xgb_locks <- xgb_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>%  
+  select(Home, Away, `Prediction`)
+top_xgb_locks
+```
+
+#### Predicting via Logistic Regression:
+
+Finally, doing the same predictions with the logistic regression model:
+
+```{r}
+week12_pred_OU_logit <- predict(model_lr, newdata = week12_matchups, type = "response")
+
+# convert the probabilities to "Over" or "Under" based on a threshold
+week12_logit_pred_OU <- ifelse(week12_pred_OU_logit > 0.418, "Over", "Under")
+
+week12_logit_pred_prob <- ifelse(week12_logit_pred_OU == "Over", 
+                               round((0.5+(week12_pred_OU_logit - 0.418))*100,3), 
+                               round((0.5+(0.418 - week12_pred_OU_logit))*100,3)
+                               )
+  
+  
+# Consolidate the predictions into a new dataframe
+logit_prediction_df <- data.frame(
+  Home = week12_matchups$home_id,   # home team ID
+  Away = week12_matchups$away_id,   # away team ID
+  Line = week12_matchups$over_under_line,  # Over/Under line
+  Prediction = week12_logit_pred_OU,  # prediction: "Over" or "Under"
+  Confidence = week12_logit_pred_prob # probability based off of prediction output
+)
+
+# display the predictions in a nicely formatted table using kable
+logit_prediction_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>O/U Predictions for Week 12 Games By Logistic Regression Model") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  column_spec(5, bold = TRUE, color = "black", background = "#f0f0f0") %>%
+  add_header_above(c("Game Information" = 3, "Prediction" = 2))
+```
+
+And as well, find the highest confidence games
+
+```{r}
+top_logit_locks <- logit_prediction_df %>%
+  arrange(desc(`Confidence`)) %>% 
+  head(3) %>%  
+  select(Home, Away, `Prediction`)
+top_logit_locks
+```
+
+#### Prediction Results:
+
+Now, lets compare our models to the actual result of these games:
+
+First, let us create and read in a dataframe with the actual O/U results:
+
+```{r}
+week12_outcomes <- read.csv("week12_outcomes.csv")
+```
+
+```{r}
+# merge the week12_outcomes dataframe with all prediction dataframes
+
+merged_df <- week12_outcomes %>%
+  left_join(select(rf_prediction_df, Home, Away, Prediction), by = c("Home", "Away")) %>%
+  rename("RF Prediction" = Prediction) %>%
+  left_join(select(gbm_prediction_df, Home, Away, Prediction), by = c("Home", "Away")) %>%
+  rename("GBM Prediction" = Prediction) %>%
+  left_join(select(xgb_prediction_df, Home, Away, Prediction), by = c("Home", "Away")) %>%
+  rename("XGBoost Prediction" = Prediction) %>%
+  left_join(select(logit_prediction_df, Home, Away, Prediction), by = c("Home", "Away")) %>%
+  rename("Logistic Regression Prediction" = Prediction)
+
+# create a formatted table with conditional coloring based on prediction match
+merged_df %>%
+  kable(format = "html", caption = "<span style='color: black;'>Week 12 Predictions vs Actual Outcomes") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, color = "white", background = "#0073e6") %>%
+  # apply green or red background color for prediction matches
+  column_spec(5, background = case_when(
+    merged_df$`RF Prediction` == merged_df$Outcome ~ "rgba(0, 255, 0, 0.8)", 
+    merged_df$`RF Prediction` != merged_df$Outcome ~ "rgba(255, 0, 0, 0.8)"  
+  )) %>%
+  column_spec(6, background = case_when(
+    merged_df$`GBM Prediction` == merged_df$Outcome ~ "rgba(0, 255, 0, 0.8)", 
+    merged_df$`GBM Prediction` != merged_df$Outcome ~ "rgba(255, 0, 0, 0.8)"  
+  )) %>%
+  column_spec(7, background = case_when(
+    merged_df$`XGBoost Prediction` == merged_df$Outcome ~ "rgba(0, 255, 0, 0.8)", 
+    merged_df$`XGBoost Prediction` != merged_df$Outcome ~ "rgba(255, 0, 0, 0.8)" 
+  )) %>%
+  column_spec(8, background = case_when(
+    merged_df$`Logistic Regression Prediction` == merged_df$Outcome ~ "rgba(0, 255, 0, 0.8)", 
+    merged_df$`Logistic Regression Prediction` != merged_df$Outcome ~ "rgba(255, 0, 0, 0.8)"  
+  )) %>%
+  add_header_above(c("Game Information" = 4, "Model Outcomes" = 4))
+
+```
+
+From this, we can see that the Random forest model performed the best with the blind predictions for Week 12 of NFL matchups, going 6/11 with an accuracy of 54.54%.
 
 # Limitations
 
@@ -819,4 +959,14 @@ Another potential area to explore is the use of every predictor in our models. S
 # Conclusion and Discussion
 
 Through using machine learning methods, we were able to train models to predict the over/under of NFL games with profit potential. Each of the models above achieves a testing accuracy of greater than 52.4%, the accuracy needed to be profitable at approximately -110 odds. Each models performed differently and the model with the greatest accuracy was logistic regression. Through our results, we can effectively and with confidence place bets on the over/under line of NFL games and make a profit.
+
+
+
+
+
+
+
+
+
+
 
